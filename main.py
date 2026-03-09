@@ -16,7 +16,10 @@ app = FastAPI()
 class InjectJSMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
-        if "/admin" in request.url.path and "text/html" in response.headers.get("content-type", ""):
+        content_type = response.headers.get("content-type", "")
+        is_form_page = any(x in request.url.path for x in ["/create", "/edit", "/detail"])
+
+        if is_form_page and "text/html" in content_type:
             body = b""
             async for chunk in response.body_iterator:
                 body += chunk
