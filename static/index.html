@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fund Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; }
+    header { padding: 32px 48px; border-bottom: 1px solid #1e2130; }
+    header h1 { font-size: 24px; font-weight: 700; color: #fff; }
+    header p { color: #888; margin-top: 4px; font-size: 14px; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 40px 24px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 40px; }
+    .stat-card { background: #1a1d2e; border-radius: 12px; padding: 20px 24px; }
+    .stat-card .label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+    .stat-card .value { font-size: 26px; font-weight: 700; margin-top: 6px; color: #fff; }
+    .stat-card .value.green { color: #4ade80; }
+    .stat-card .value.red { color: #f87171; }
+    .chart-box { background: #1a1d2e; border-radius: 12px; padding: 24px; margin-bottom: 32px; }
+    .chart-box h2 { font-size: 16px; font-weight: 600; margin-bottom: 20px; color: #ccc; }
+    .charts-row { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 32px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { text-align: left; padding: 12px 16px; font-size: 12px; color: #888; text-transform: uppercase; border-bottom: 1px solid #2a2d3e; }
+    tbody tr { border-bottom: 1px solid #1e2130; cursor: pointer; transition: background 0.15s; }
+    tbody tr:hover { background: #1e2130; }
+    tbody td { padding: 14px 16px; font-size: 14px; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .badge.buy { background: #14532d; color: #4ade80; }
+    .badge.sell { background: #450a0a; color: #f87171; }
+    .thesis-row td { padding: 0 16px 16px 16px; }
+    .thesis-box { background: #0f1117; border-left: 3px solid #6366f1; padding: 16px; border-radius: 8px; font-size: 14px; line-height: 1.7; color: #ccc; }
+    .thesis-box p { margin-bottom: 8px; }
+    @media (max-width: 768px) { .charts-row { grid-template-columns: 1fr; } header { padding: 24px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📈 Mój Fundusz Demo</h1>
+    <p>Portfel papierowy — publiczny dziennik inwestycyjny</p>
+  </header>
+
+  <div class="container">
+    <div class="stats">
+      <div class="stat-card">
+        <div class="label">Wartość portfela</div>
+        <div class="value" id="portfolio-value">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Zwrot portfela</div>
+        <div class="value" id="portfolio-return">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Zwrot benchmarku (SPY)</div>
+        <div class="value" id="benchmark-return">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Liczba pozycji</div>
+        <div class="value" id="positions-count">—</div>
+      </div>
+    </div>
+
+    <div class="charts-row">
+      <div class="chart-box">
+        <h2>Equity Curve vs SPY</h2>
+        <canvas id="performanceChart"></canvas>
+      </div>
+      <div class="chart-box">
+        <h2>Skład portfela</h2>
+        <canvas id="allocationChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-box">
+      <h2>Historia transakcji</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Ticker</th>
+            <th>Nazwa</th>
+            <th>Kierunek</th>
+            <th>Ilość</th>
+            <th>Cena</th>
+            <th>Wartość</th>
+          </tr>
+        </thead>
+        <tbody id="transactions-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    async function loadPerformance() {
+      const res = await fetch("/api/performance");
+      const data = await res.json();
+      if (!data.length) return;
+
+      const labels = data.map(d => d.date);
+      const portfolio = data.map(d => d.portfolio_value);
+      const benchmark = data.map(d => d.benchmark_value);
+
+      const start = portfolio[0];
+      const current = portfolio[portfolio.length - 1];
+      const benchStart = benchmark[0];
+      const benchCurrent = benchmark[benchmark.length - 1];
+
+      const pReturn = ((current - start) / start * 100).toFixed(2);
+      const bReturn = ((benchCurrent - benchStart) / benchStart * 100).toFixed(2);
+
+      document.getElementById("portfolio-value").textContent = "$" + current.toLocaleString("en-US", {minimumFractionDigits: 2});
+      const pEl = document.getElementById("portfolio-return");
+      pEl.textContent = (pReturn >= 0 ? "+" : "") + pReturn + "%";
+      pEl.className = "value " + (pReturn >= 0 ? "green" : "red");
+      const bEl = document.getElementById("benchmark-return");
+      bEl.textContent = (bReturn >= 0 ? "+" : "") + bReturn + "%";
+      bEl.className = "value " + (bReturn >= 0 ? "green" : "red");
+
+      new Chart(document.getElementById("performanceChart"), {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            { label: "Portfel", data: portfolio, borderColor: "#6366f1", backgroundColor: "rgba(99,102,241,0.1)", tension: 0.3, fill: true, pointRadius: 3 },
+            { label: "SPY", data: benchmark, borderColor: "#f59e0b", backgroundColor: "transparent", tension: 0.3, borderDash: [5,5], pointRadius: 0 }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { labels: { color: "#ccc" } } },
+          scales: {
+            x: { ticks: { color: "#666", maxTicksLimit: 8 }, grid: { color: "#1e2130" } },
+            y: { ticks: { color: "#666" }, grid: { color: "#1e2130" } }
+          }
+        }
+      });
+    }
+
+    async function loadTransactions() {
+      const res = await fetch("/api/transactions");
+      const data = await res.json();
+
+      document.getElementById("positions-count").textContent = data.length;
+
+      const holdings = {};
+      data.slice().reverse().forEach(t => {
+        if (t.direction === "BUY") holdings[t.ticker] = (holdings[t.ticker] || 0) + t.quantity;
+        else if (t.direction === "SELL") holdings[t.ticker] = (holdings[t.ticker] || 0) - t.quantity;
+      });
+
+      const activeHoldings = Object.entries(holdings).filter(([, v]) => v > 0);
+      document.getElementById("positions-count").textContent = activeHoldings.length;
+
+      new Chart(document.getElementById("allocationChart"), {
+        type: "doughnut",
+        data: {
+          labels: activeHoldings.map(([k]) => k),
+          datasets: [{
+            data: activeHoldings.map(([, v]) => v),
+            backgroundColor: ["#6366f1","#f59e0b","#4ade80","#f87171","#38bdf8","#a78bfa"],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { labels: { color: "#ccc" } } }
+        }
+      });
+
+      const tbody = document.getElementById("transactions-body");
+      data.forEach(t => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${t.date}</td>
+          <td><strong>${t.ticker}</strong></td>
+          <td>${t.name || "—"}</td>
+          <td><span class="badge ${t.direction === "BUY" ? "buy" : "sell"}">${t.direction}</span></td>
+          <td>${t.quantity}</td>
+          <td>$${t.price}</td>
+          <td>$${(t.quantity * t.price).toFixed(2)}</td>
+        `;
+        tbody.appendChild(row);
+
+        if (t.thesis) {
+          const thesisRow = document.createElement("tr");
+          thesisRow.className = "thesis-row";
+          thesisRow.style.display = "none";
+          thesisRow.innerHTML = `<td colspan="7"><div class="thesis-box">${marked.parse(t.thesis)}</div></td>`;
+          tbody.appendChild(thesisRow);
+          row.addEventListener("click", () => {
+            thesisRow.style.display = thesisRow.style.display === "none" ? "table-row" : "none";
+          });
+        }
+      });
+    }
+
+    loadPerformance();
+    loadTransactions();
+  </script>
+</body>
+</html>
