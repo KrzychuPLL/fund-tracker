@@ -1,0 +1,66 @@
+let
+    Baza = "https://moam.knf.gov.pl/moam.nsf/mOAM?readForm&RestrictToCategory=",
+    DniWstecz = 7,
+    NaStronie = 20,
+    MaxStron = 10,
+
+    Slowa = {"art69", "art70", "artykuł69", "artykułu69", "artykuł70", "artykułu70",
+             "stanuposiadania", "ogólnejliczbiegłosów", "zawiadomienieakcjonariusz",
+             "porozumieni", "zmianiecelu"},
+
+    Kolumny = {"Emitent", "Data wpływu", "Tytuł raportu"},
+    Pusta = #table(Kolumny, {}),
+
+    fnTxt = (x as any) as text =>
+        if x is table then
+            Text.Trim(Text.Combine(List.Transform(Table.ToRows(x), each Text.Combine(List.Transform(_, each @fnTxt(_)), " ")), " "))
+        else if x = null then ""
+        else Text.From(x),
+
+    fnStrona = (d as date, s as number) as table =>
+        let
+            Dzien = Date.ToText(d, "yyyy-MM-dd"),
+            Url = Baza & Dzien & "&start=" & Text.From(s) & "&count=" & Text.From(NaStronie),
+            Src = Web.Page(Web.Contents(Url)),
+            Tabele = List.Select(Src[Data], each Table.ColumnCount(_) >= 3 and Table.RowCount(_) > 0),
+            Najw = List.Max(Tabele, null, each Table.RowCount(_)),
+            Nazwy = List.FirstN(Table.ColumnNames(Najw), 3),
+            Trzy = Table.SelectColumns(Najw, Nazwy),
+            Nazwane = Table.RenameColumns(Trzy, List.Zip({Nazwy, Kolumny})),
+            Tekst = Table.TransformColumns(Nazwane,
+                {{"Emitent", each fnTxt(_), type text},
+                 {"Data wpływu", each fnTxt(_), type text},
+                 {"Tytuł raportu", each fnTxt(_), type text}}),
+            Czyste = Table.SelectRows(Tekst, each [Data wpływu] = Dzien and [Tytuł raportu] <> "")
+        in
+            Czyste,
+
+    fnStronaBezpiecznie = (d as date, s as number) as table =>
+        try fnStrona(d, s) otherwise Pusta,
+
+    fnDzien = (d as date) as table =>
+        let
+            Strony = List.Generate(
+                () => [s = 1, t = fnStronaBezpiecznie(d, 1)],
+                each Table.RowCount([t]) > 0,
+                each [
+                    s = [s] + NaStronie,
+                    t = if Table.RowCount([t]) < NaStronie or [s] / NaStronie >= MaxStron
+                        then Pusta
+                        else fnStronaBezpiecznie(d, [s] + NaStronie)
+                ],
+                each [t])
+        in
+            if List.IsEmpty(Strony) then Pusta else Table.Combine(Strony),
+
+    Dni = List.Transform({0..DniWstecz-1}, each Date.AddDays(Date.From(DateTime.LocalNow()), -_)),
+    Wszystko = Table.Combine(List.Transform(Dni, fnDzien)),
+
+    Norm = Table.AddColumn(Wszystko, "tmp", each
+        Text.Remove(Text.Lower([Tytuł raportu]), {" ", ".", "#(00A0)", "-", "_"}), type text),
+
+    Filtr = Table.SelectRows(Norm, each List.AnyTrue(List.Transform(Slowa, (s) => Text.Contains([tmp], s)))),
+
+    Wynik = Table.Sort(Table.RemoveColumns(Filtr, {"tmp"}), {{"Data wpływu", Order.Descending}})
+in
+    Wynik
