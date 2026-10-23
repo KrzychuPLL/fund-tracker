@@ -4,9 +4,13 @@ let
     NaStronie = 20,
     MaxStron = 10,
 
-    Slowa = {"art69", "art70", "artykuł69", "artykułu69", "artykuł70", "artykułu70",
-             "stanuposiadania", "ogólnejliczbiegłosów", "zawiadomienieakcjonariusz",
-             "porozumieni", "zmianiecelu"},
+    // Wzorce wpadają zawsze, gdy tytuł (bez spacji, kropek, myślników, małymi literami) je zawiera
+    Slowa = {"stanuposiadania", "zawiadomienieakcjonariusz", "zmianiecelu",
+             "progu", "progów", "zmianaudziału", "zmianieudziału", "zmianąudziału"},
+
+    // Tytuły odrzucane (np. listy akcjonariuszy na WZA), z wyjątkiem tytułów z art. 69/70
+    Wykluczenia = {"listaakcjonariusz", "listęakcjonariusz", "akcjonariuszyposiadając",
+                   "nwza", "zwza", "walnezgromadzenie", "walnegozgromadzenia", "uchwał"},
 
     Kolumny = {"Emitent", "Data wpływu", "Tytuł raportu"},
     Pusta = #table(Kolumny, {}),
@@ -59,7 +63,21 @@ let
     Norm = Table.AddColumn(Wszystko, "tmp", each
         Text.Remove(Text.Lower([Tytuł raportu]), {" ", ".", "#(00A0)", "-", "_"}), type text),
 
-    Filtr = Table.SelectRows(Norm, each List.AnyTrue(List.Transform(Slowa, (s) => Text.Contains([tmp], s)))),
+    CzyZmiana = (t as text) as logical =>
+        Text.Contains(t, "przekroczeni") or Text.Contains(t, "osiągnięci")
+        or Text.Contains(t, "zmniejszeni") or Text.Contains(t, "zmianaudziału")
+        or Text.Contains(t, "zmianieudziału") or Text.Contains(t, "zmianąudziału")
+        or Text.Contains(t, "zmianiestanu") or Text.Contains(t, "zmianastanu"),
+
+    Filtr = Table.SelectRows(Norm, each
+        let t = [tmp] in
+        Text.Contains(t, "art69") or Text.Contains(t, "art70")
+        or Text.Contains(t, "artykuł69") or Text.Contains(t, "artykułu69")
+        or Text.Contains(t, "artykuł70") or Text.Contains(t, "artykułu70")
+        or (not List.AnyTrue(List.Transform(Wykluczenia, (w) => Text.Contains(t, w)))
+            and (List.AnyTrue(List.Transform(Slowa, (s) => Text.Contains(t, s)))
+                 or (CzyZmiana(t) and (Text.Contains(t, "głos") or Text.Contains(t, "akcj")
+                                       or Text.Contains(t, "udział") or Text.Contains(t, "%")))))),
 
     Wynik = Table.Sort(Table.RemoveColumns(Filtr, {"tmp"}), {{"Data wpływu", Order.Descending}})
 in
